@@ -16,3 +16,6 @@ Please open an [Issue](https://github.com/IMRCLab/crazyswarm2/issues) if you bel
 
 - Bug reports.
 - New feature proposals with details.
+
+# Gazebo Integration documentation
+https://sites.google.com/view/midas-ece495/home
