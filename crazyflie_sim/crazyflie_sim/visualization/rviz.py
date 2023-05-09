@@ -31,6 +31,20 @@ class Visualization:
             msg.transform.rotation.w = state.quat[0]
             msgs.append(msg)
         self.tfbr.sendTransform(msgs)
+    
+    def step_individual( self, t, state: State, state_desired: State, action: Action, name:str):
+        msg = TransformStamped()
+        msg.header.stamp = self.node.get_clock().now().to_msg()
+        msg.header.frame_id = "world"
+        msg.child_frame_id = name
+        msg.transform.translation.x = state.pos[0]
+        msg.transform.translation.y = state.pos[1]
+        msg.transform.translation.z = state.pos[2]
+        msg.transform.rotation.x = state.quat[1]
+        msg.transform.rotation.y = state.quat[2]
+        msg.transform.rotation.z = state.quat[3]
+        msg.transform.rotation.w = state.quat[0]
+        self.tfbr.sendTransform([msg])
 
     def shutdown(self):
         pass

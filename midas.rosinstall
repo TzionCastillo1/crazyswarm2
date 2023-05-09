@@ -1,0 +1,4 @@
+- git:
+    local-name: ros_gz
+    version: ros2
+    uri: https://github.com/gazebosim/ros_gz.git

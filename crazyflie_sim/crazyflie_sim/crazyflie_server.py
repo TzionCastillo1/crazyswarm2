@@ -11,15 +11,21 @@ import rclpy
 from rclpy.node import Node
 import rowan
 import importlib
+import numpy as np
 
 from crazyflie_interfaces.srv import Takeoff, Land, GoTo
 from crazyflie_interfaces.srv import UploadTrajectory, StartTrajectory, NotifySetpointsStop
 from crazyflie_interfaces.msg import Hover, FullState
 
+from actuator_msgs.msg import Actuators
+from sensor_msgs.msg import Imu
 from std_srvs.srv import Empty
 from geometry_msgs.msg import Twist
+from nav_msgs.msg import Odometry
 
 from functools import partial
+
+import socket
 
 # import BackendRviz from .backend_rviz
 # from .backend import *
@@ -66,6 +72,8 @@ class CrazyflieServer(Node):
         class_ = getattr(module, "Backend")
         self.backend = class_(self, names, initial_states)
 
+        # initialize variables related to UDP server
+
         # initialize visualizations by dynamically loading the modules
         self.visualizations = []
         for vis_key in self._ros_parameters["sim"]["visualizations"]:
@@ -75,7 +83,7 @@ class CrazyflieServer(Node):
                 vis = class_(self, self._ros_parameters["sim"]["visualizations"][vis_key], names, initial_states)
                 self.visualizations.append(vis)
 
-        controller_name = backend_name = self._ros_parameters["sim"]["controller"]
+        controller_name = self._ros_parameters["sim"]["controller"]
 
         # create robot SIL objects
         for name, initial_state in zip(names, initial_states):
@@ -129,9 +137,20 @@ class CrazyflieServer(Node):
                 "/cmd_full_state", partial(self._cmd_full_state_changed, name=name), 10
             )
 
+        self.q = []
         # step as fast as possible
-        max_dt = 0.0 if "max_dt" not in self._ros_parameters["sim"] else self._ros_parameters["sim"]["max_dt"]
-        self.timer = self.create_timer(max_dt, self._timer_callback)
+        if backend_name !="gazebo":
+            max_dt = 0.0 if "max_dt" not in self._ros_parameters["sim"] else self._ros_parameters["sim"]["max_dt"]
+            self.timer = self.create_timer(max_dt, self._timer_callback)
+        else:
+            #max_dt = 0.01 if "max_dt" not in self._ros_parameters["sim"] else self._ros_parameters["sim"]["max_dt"]
+            #self.timer = self.create_timer(max_dt, self._gz_timer_callback)
+            self.actuator_msg = Actuators()
+            for name, _ in self.cfs.items():
+                self.actuator_publisher = self.create_publisher(Actuators, name + "/crazyflie/gazebo/command/motor_speed", 10)
+                self.create_subscription(Imu, name + "/imu", partial(self._gz_imu_callback, name=name), 10)
+                self.create_subscription(Odometry, name + "/model/crazyflie/odometry", partial(self._gz_odom_callback, name=name), 10)
+        
         self.is_shutdown = False
 
     def on_shutdown_callback(self):
@@ -142,16 +161,89 @@ class CrazyflieServer(Node):
 
             self.is_shutdown = True
 
+    def _gz_imu_callback(self, msg, name = ""):
+        cfs = self.cfs if name == "all" else {name: self.cfs[name]}
+        for _, cf in cfs.items():
+            cf.sensors.acc.x = msg.linear_acceleration.x
+            cf.sensors.acc.y = msg.linear_acceleration.y
+            cf.sensors.acc.z = msg.linear_acceleration.z
+            cf.sensors.gyro.x = np.degrees(msg.angular_velocity.x)
+            cf.sensors.gyro.y = np.degrees(msg.angular_velocity.y)
+            cf.sensors.gyro.z = np.degrees(msg.angular_velocity.z)
+            pass
+            
+
+    def _gz_odom_callback(self, msg, name):
+        #cf = self.cfs[name]
+        pos = [msg.pose.pose.position.x, msg.pose.pose.position.y, msg.pose.pose.position.z]
+        q = [msg.pose.pose.orientation.w, msg.pose.pose.orientation.x, msg.pose.pose.orientation.y, msg.pose.pose.orientation.z]
+        vel = [msg.twist.twist.linear.x, msg.twist.twist.linear.y, msg.twist.twist.linear.z]
+        omega = [msg.twist.twist.angular.x, msg.twist.twist.angular.y, msg.twist.twist.angular.z]
+        cfs = self.cfs if name == "all" else {name: self.cfs[name]}
+        for _, cf in cfs.items():
+            state = State()
+            state.pos = pos
+            state.vel = vel
+            state.quat = q
+            state.omega = omega 
+            cf.setState(state)
+            state_desired = cf.getSetpoint()
+            action = cf.executeController()
+            self.get_logger().info("action: %s" %str(action))
+            self._action_gz_publisher(action, name)
+            
+            states_desired = []
+            actions = []
+            for vis in self.visualizations:
+                vis.step_individual(self.backend.time(), state, states_desired, actions, name)
+
+    def _action_gz_publisher(self, action, name=""):
+        #self.get_logger().info("action Publisher %d" %action.rpm[0])
+        # actions come from SIL as RPM values for each motor
+        # this needs to be converted to rad/s
+        self.actuator_msg.header.frame_id = name
+        #self.actuator_msg.header.stamp = self.get_clock().now().to_msg()
+        actuation_rpm = [float(motor_rpm) for motor_rpm in action.rpm]
+        self.actuator_msg.velocity = [self._rpm_to_rads(actuator_rpm) for actuator_rpm in actuation_rpm]
+        #for act in actuation_rpm:
+            #self.get_logger().info("Publishing action: %f" %act)
+        self.actuator_publisher.publish(self.actuator_msg)
+
+    def _rpm_to_rads(self, rpm)-> float:
+        return float(rpm * .1047) 
+    
+    def _gz_timer_callback(self):
+        # update setpoint
+        states_desired = [cf.getSetpoint() for _, cf in self.cfs.items()]
+
+        # execute the control loop
+        #list of rpm's corresponding to each motor
+        actions = [cf.executeController()  for _, cf in self.cfs.items()]
+
+        self.get_logger().info("actions: %s" %str(actions))
+        # execute the physics simulator
+        for action, (_, cf) in zip(actions, self.cfs.items()):
+            self._action_gz_publisher(action,_)
+
+        states_next = [cf.getState() for _, cf in self.cfs.items()]
+        # update the resulting state
+        #for state, (_, cf) in zip(states_next, self.cfs.items()):
+        #    cf.setState(state)
+
+        for vis in self.visualizations:
+            vis.step(self.backend.time(), states_next, states_desired, actions)
+
     def _timer_callback(self):
         # update setpoint
         states_desired = [cf.getSetpoint() for _, cf in self.cfs.items()]
 
         # execute the control loop
+        #list of rpm's corresponding to each motor
         actions = [cf.executeController()  for _, cf in self.cfs.items()]
 
+        self.get_logger().info("actions: %s" %str(actions))
         # execute the physics simulator
         states_next = self.backend.step(states_desired, actions)
-
         # update the resulting state
         for state, (_, cf) in zip(states_next, self.cfs.items()):
             cf.setState(state)
@@ -307,6 +399,8 @@ class CrazyflieServer(Node):
             rpy[2],
             [msg.twist.angular.x, msg.twist.angular.y, msg.twist.angular.z])
 
+# Create a new class that inherits from Thread. This class will be responsible for listening
+# to any traffic on the open port
 
 def main(args=None):
 

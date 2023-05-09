@@ -60,12 +60,17 @@ class Quadrotor:
         # 	[0.83,16.66,1.8],
         # 	[0.72,1.8,29.26]
         # 	]) * 1e-6  # kg m^2
+        # Moment of Inertia Matrix
         self.J = np.array([16.571710e-6, 16.655602e-6, 29.261652e-6])
 
         # Note: we assume here that our control is forces
         arm_length = 0.046 # m
+        # Converting arm length to cartesian coordinates relative to the center of 
+        # the crazyflie
         arm = 0.707106781 * arm_length
         t2t = 0.006 # thrust-to-torque ratio
+
+        #Yawing torque exerted by the motors & props
         self.B0 = np.array([
             [1, 1, 1, 1],
             [-arm, -arm, arm, arm],
@@ -91,6 +96,7 @@ class Quadrotor:
             force_in_newton = force_in_grams * 9.81 / 1000.0
             return np.maximum(force_in_newton, 0)
 
+        # array of forces for each prop
         force = rpm_to_force(action.rpm)
 
         # compute next state

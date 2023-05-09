@@ -75,6 +75,9 @@ class CrazyflieSIL:
         self.sensors.gyro.x = 0
         self.sensors.gyro.y = 0
         self.sensors.gyro.z = 0
+        self.sensors.acc.x = 0
+        self.sensors.acc.y = 0
+        self.sensors.acc.z = 0
 
         # current controller output
         self.control = firm.control_t()
@@ -117,6 +120,7 @@ class CrazyflieSIL:
             firm.plan_land(self.planner,
                 self.cmdHl_pos,
                 self.cmdHl_yaw, targetHeight, targetYaw, duration, self.time_func())
+            #self.mode = CrazyflieSIL.MODE_IDLE
 
     # def stop(self, groupMask = 0):
     #     if self._isGroup(groupMask):
@@ -231,6 +235,7 @@ class CrazyflieSIL:
         # self.state = setState
         # return self._fwstate_to_sim_data_types_state(setState)
 
+    
     def setState(self, state: sim_data_types.State):
         self.state.position.x = state.pos[0]
         self.state.position.y = state.pos[1]
@@ -257,6 +262,13 @@ class CrazyflieSIL:
         self.sensors.gyro.z = np.degrees(state.omega[2])
 
         # TODO: state technically also has acceleration, but sim_data_types does not
+
+    def getState(self)->sim_data_types.State:
+        pos = np.array([self.state.position.x, self.state.position.y, self.state.position.z])
+        vel = np.array([self.state.velocity.x, self.state.velocity.y, self.state.velocity.z])
+        quat = rowan.normalize(np.array([self.state.attitudeQuaternion.w, self.state.attitudeQuaternion.x, self.state.attitudeQuaternion.y, self.state.attitudeQuaternion.z]))
+        omega = np.array([self.sensors.gyro.x, self.sensors.gyro.y, self.sensors.gyro.z])
+        return sim_data_types.State(pos, vel, quat, omega)
 
     def executeController(self):
         if self.controller is None:
@@ -287,7 +299,7 @@ class CrazyflieSIL:
         # convert PWM -> RPM
         def pwm_to_rpm(pwm):
             # polyfit using data and scripts from https://github.com/IMRCLab/crazyflie-system-id
-            if pwm < 10000:
+            if pwm < 100: # 10000
                 return 0
             p = [3.26535711e-01, 3.37495115e+03]
             return np.polyval(p, pwm)

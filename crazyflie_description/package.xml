@@ -1,18 +1,20 @@
 <?xml version="1.0"?>
-<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<?xml-model href="http://downolad.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-	<name>crazyswarm_gazebo</name>
+	<name>crazyflie_description</name>
 	<version>0.0.0</version>
-	<description>Gazebo backend implementation for crazyswarm SITL</description>
+	<description> ADD DESCRIPTION</description>
 	<maintainer email="tzionmcastillo@gmail.com">Tzion Castillo</maintainer>
 	<license> IDK </license>
 	<author>Tzion Castillo</author>
-	
+
 	<buildtool_depend>ament_cmake</buildtool_depend>
-	
+
 	<test_depend>ament_lint_auto</test_depend>
 
 	<export>
 		<build_type>ament_cmake</build_type>
 	</export>
 </package>
+
+
